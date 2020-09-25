@@ -8,7 +8,8 @@ TARGETS = $(BUILDDIR)/libutil.so \
 	  $(BUILDDIR)/libtest_stream_sampler.so \
 	  $(BUILDDIR)/test_stream_publish \
 	  $(BUILDDIR)/test_ovis_ev \
-	  $(BUILDDIR)/test_ovis_json
+	  $(BUILDDIR)/test_ovis_json \
+	  $(BUILDDIR)/libtest_store.so
 
 LDMSD_VERSION = $(shell /usr/bin/strings ${OVIS_PREFIX}/sbin/ldmsd | \
 	      grep OVIS_LDMS_VERSION | \
@@ -52,6 +53,14 @@ else
 	    ${GCC_COMMON_FLAGS}
 	ln -fs $@ $@.0
 endif
+
+$(BUILDDIR)/libtest_store.so: test_store.c
+	mkdir -p $(BUILDDIR)
+	gcc -I $(OVIS_PREFIX)/include -o $@ -fPIC -shared \
+	    $^ -L$(OVIS_PREFIX)/lib -L$(OVIS_PREFIX)/lib64 \
+	    -lldms \
+	    ${GCC_COMMON_FLAGS}
+	ln -fs $@ $@.0
 
 $(BUILDDIR)/test_stream_publish: test_stream_publish.c
 	mkdir -p $(BUILDDIR)
