@@ -337,21 +337,32 @@ class LDMSD(Proc):
     def cmdline_validate(self, cmdline):
         return cmdline.find(self.name) >= 0
 
+    def writeConfig(self):
+        """Write configuration to the configuration file"""
+        conf_txt = self.getConfig()
+        f = open(self.conf_file, "w")
+        f.write(conf_txt)
+        f.close()
+
+    def getCmdline(self, gdb=False):
+        _edir = self.getExpectedDir()
+        self.mem_opt = " -m {}K ".format(2*len(_edir))
+        cmd = "{gdb} " \
+              "ldmsd {fg} -c {conf_file} -r {pid_file} -l {log_file} " \
+              "-v {log_level} {mem_opt}" \
+              .format(gdb = "gdb --args" if gdb else "",
+                      fg = "-F" if gdb else "",
+                      **vars(self))
+        return cmd
+
     def start(self):
         self._host_check()
         _pid = self.getpid()
         if _pid:
             logger.info("{} already running (pid {})".format(self.name, _pid))
             return # already running
-        _edir = self.getExpectedDir()
-        self.mem_opt = " -m {}K ".format(2*len(_edir)) if self.agg_level else ""
-        conf_txt = self.getConfig()
-        f = open(self.conf_file, "w")
-        f.write(conf_txt)
-        f.close()
-        cmd = "ldmsd -c {conf_file} -r {pid_file} -l {log_file} "\
-              "-v {log_level} {mem_opt}" \
-              .format(**vars(self))
+        self.writeConfig()
+        cmd = self.getCmdline()
         sp.run(cmd, shell=True, executable="/bin/bash") # ldmsd will daemonize
 
     def cleanup(self):
@@ -501,6 +512,11 @@ class LDMSD(Proc):
         if not self._conn:
             self.connect()
         return self._conn.dir()
+
+    def lookup(self, name):
+        if not self._conn:
+            self.connect()
+        return self._conn.lookup(name)
 
     def wait_set_removed(self, rm_sets=None, timeout=0, interval=10):
         logger.info("{}: waiting for set removal".format(self.name))

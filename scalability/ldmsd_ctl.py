@@ -19,7 +19,7 @@ p.add_argument("-l", "--list", default=False, action="store_true",
 p.add_argument("-j", "--json", default=False, action="store_true",
                help="Produce JSON output (for status only)")
 p.add_argument("command", nargs='?', type=str, default="status",
-               help="status|start|stop|cleanup")
+               help="status|start|stop|cleanup|gdb-start")
 p.add_argument("daemons", nargs='*', type=str,
                help="list of daemons to control")
 args = p.parse_args()
@@ -40,11 +40,25 @@ status_tbl = dict()
 
 INT = lambda x: int(x) if x else 0
 
+def gdb_start(d):
+    """Handling `gdb-start` command"""
+    if not daemons:
+        print("No daemons to work with ... please check config.py")
+        sys.exit(-1)
+    if len(daemons) > 1:
+        print("`gdb-start` supports only 1 daemon, "
+              "selecting {} and ignore the rest.".format(d.name))
+    d.writeConfig()
+    cmd = d.getCmdline(gdb=True)
+    print("cmd:", cmd)
+    os.execl("/bin/bash", "/bin/bash", "-c", cmd)
+
 fn_tbl = {
         "status": lambda l: status_tbl.update([(l.name, INT(l.getpid()))]),
         "start": lambda l: l.start() if not l.pid else 0,
         "stop": lambda l: l.stop() if l.pid else 0,
         "cleanup": lambda l: l.cleanup(),
+        "gdb-start": gdb_start,
     }
 
 fn = fn_tbl.get(args.command)
