@@ -1,0 +1,449 @@
+#!/usr/bin/env python3
+
+# The test script is to test whether ldmsd honors the state diagram of
+# sampler cfgobj.
+#
+# State Diagram:
+#                                      |
+#                                     load
+#                                      |
+#                                      v
+#   -------------                   ------
+#  | TERMINATING |<----- term -----| INIT |
+#   -------------                   ------
+#         ^                            |
+#         |                          config
+#         |                            |
+#         |                            v
+#         |                       ------------
+#         +-------- term --------| CONFIGURED |<---+----+
+#                                 ------------     |    |
+#                                   |    |         |    |
+#                                 start  |         |    |
+#                                   |    +-----config   |
+#                                   v                   |
+#                               ---------               |
+#                              | RUNNING |              |
+#                               ---------               |
+#                                   |                   |
+#                                  stop                 |
+#                                   |                   |
+#                                   +-------------------+
+
+
+# load a sampler cfgobj A
+#   -> assert(state == INIT)
+# configure A
+#   -> assert(state == CONFIGURED)
+# start A
+#   -> assert(state == RUNNING)
+# stop A
+#   -> assert(state == CONFIGURED)
+# term A
+#   -> assert(state == TERMINATING)
+#
+# load a sampler cfgobj B and then term B
+#   -> assert(success)
+#
+# load a sampler cfgobj C and configure C and term C
+#   -> assert(success && state == TERMINATING)
+#
+# load a sampler cfgobj D and configure D and stop D
+#   -> assert(success && state == CONFIGURED)
+#
+# load a sampler cfgobj E and stop E
+#   -> assert(success && state == INIT)
+#
+# load a sampler cfgobj and configure and configure
+#   -> assert(success && state == CONFIGURED)
+#
+# load a sampler cfgobj F and start F
+#  -> assert(failed && state == INIT) # need to be configured first
+#
+# load a sampler cfgobj G and config G and start G and term G
+#  -> assert(failed && state == RUNNING)
+#
+# load a sampler cfgobj H and config H and start H and config H
+#  -> assert(failed && state == RUNNING)
+
+import os
+import sys
+import argparse
+import logging
+import atexit
+import time
+import json
+import errno
+
+import TADA
+
+from LDMS_Test import LDMSDCluster, LDMSDContainer, process_args, \
+                      add_common_args, assertion_id_get
+
+if __name__ != "__main__":
+    raise RuntimeError("This should not be imported as a module.")
+
+class Debug(object):
+    pass
+D = Debug()
+
+logging.basicConfig(format = "%(asctime)s %(name)s %(levelname)s %(message)s",
+                    level = logging.INFO)
+
+log = logging.getLogger(__name__)
+
+exec(open(os.getenv("PYTHONSTARTUP", "/dev/null")).read())
+
+#### argument parsing ####
+ap = argparse.ArgumentParser(description="Verify that ldmsd follows the designed " \
+                                         "sampler cfgobj state diagram.")
+
+add_common_args(ap)
+args = ap.parse_args()
+process_args(args)
+
+#### config variables ####
+USER = args.user
+PREFIX = args.prefix
+COMMIT_ID = args.commit_id
+SRC = args.src
+CLUSTERNAME = args.clustername
+
+LDMSD_PORT = 10000
+LDMSD_XPRT = "sock"
+
+spec = {
+    "name" : CLUSTERNAME,
+    "description" : f"{USER}'s sampler_cfgobj_states_test cluster",
+    "type" : "NA",
+    "nodes" : [
+        {
+            "hostname" : "node-1",
+            "component_id" : 1,
+            "daemons" : [
+                {
+                    "name" : "sshd",
+                    "type" : "sshd"
+                },
+                {
+                    "name" : "sampler-daemon",
+                    "type" : "ldmsd",
+                    "listen" : [
+                        {"port" : LDMSD_PORT, "xprt" : LDMSD_XPRT}
+                    ]
+                }
+            ]
+        }
+    ], # nodes
+    "cap_add" : ["SYS_PTRACE", "SYS_ADMIN"],
+    "image" : args.image,
+    "ovis_prefix" : PREFIX,
+    "mounts" : args.mount + ([f"{args.src}:{args.src}:ro"] if args.src else []) +
+                [f"{os.path.realpath(sys.path[0])}:/tada-src:ro"]
+}
+
+#### Test definition ####
+test = TADA.Test(test_suite = "LDMSD",
+                 test_type = "FVT",
+                 test_name = "sampler_cfgobj_states_test",
+                 test_desc = "Test sampelr cfgobj states",
+                 test_user = args.user,
+                 commit_id = COMMIT_ID,
+                 tada_addr = args.tada_addr)
+# load a sampler cfgobj A
+#   -> assert(state == INIT)
+# configure A
+#   -> assert(state == CONFIGURED)
+# start A
+#   -> assert(state == RUNNING)
+# stop A
+#   -> assert(state == CONFIGURED)
+# term A
+#   -> assert(state == TERMINATING)
+case_id = assertion_id_get()
+
+# Load -> INIT
+TEST_INIT_STATE = next(case_id)
+test.add_assertion(TEST_INIT_STATE, "State is INIT after load")
+
+# config -> CONFIGURED
+TEST_CONFIG_STATE = next(case_id)
+test.add_assertion(TEST_CONFIG_STATE, "State is CONFIGURED after config")
+
+# start -> RUNNING
+TEST_RUNNING_STATE = next(case_id)
+test.add_assertion(TEST_RUNNING_STATE, "State is RUNNING after start")
+
+# stop -> CONFIGURED
+TEST_STOP_STATE = next(case_id)
+test.add_assertion(TEST_STOP_STATE, "State is CONFIGURED after stop")
+
+# term -> TERMINATING
+TEST_TERM_STATE = next(case_id)
+test.add_assertion(TEST_TERM_STATE, "State is TERMINATING after term")
+
+# load -> config -> start -> stop -> term
+TEST_FULL_LIFECYCLE = next(case_id)
+test.add_assertion(TEST_FULL_LIFECYCLE, "Complete lifecycle from load to term")
+# load -> term
+#   -> assert(success)
+TEST_TERM_FROM_INIT = next(case_id)
+test.add_assertion(TEST_TERM_FROM_INIT, "Terminate immediately after load")
+# load -> config -> term
+#   -> assert(success && state == TERMINATING)
+TEST_TERM_AFTER_CONFIG = next(case_id)
+test.add_assertion(TEST_TERM_AFTER_CONFIG, "Terminate after configuration")
+# load -> config -> stop
+#   -> assert(success && state == CONFIGURED)
+TEST_STOP_AFTER_CONFIG = next(case_id)
+test.add_assertion(TEST_STOP_AFTER_CONFIG, "Stop without starting")
+# load -> stop
+#   -> assert(success && state == INIT)
+TEST_STOP_AFTER_LOAD = next(case_id)
+test.add_assertion(TEST_STOP_AFTER_LOAD, "Stop before configuration")
+# load -> config -> config
+#   -> assert(success && state == CONFIGURED)
+TEST_RECONFIG_AFTER_CONFIG = next(case_id)
+test.add_assertion(TEST_RECONFIG_AFTER_CONFIG, "Reconfigure while in configured state")
+# load -> start -> stop -> config
+#  -> assert(success && state == CONFIGURED) # need to be configured first
+TEST_RECONFIG_AFTER_STOP = next(case_id)
+test.add_assertion(TEST_RECONFIG_AFTER_STOP, "Reconfigure after stopping")
+# load -> start
+#  -> assert(failed && state == INIT) # need to be configured first
+TEST_START_AFTER_LOAD = next(case_id)
+test.add_assertion(TEST_START_AFTER_LOAD, "Start wihtout configuration (fails)")
+# load -> config -> start -> term
+#  -> assert(failed && state == RUNNING)
+TEST_TERM_AFTER_START = next(case_id)
+test.add_assertion(TEST_TERM_AFTER_START, "Ternimate while running (fails)")
+# load -> config -> start -> config
+#  -> assert(failed && state == RUNNING)
+TEST_CONFIG_AFTER_START = next(case_id)
+test.add_assertion(TEST_CONFIG_AFTER_START, "Configure while running (fails)")
+
+def ldmsd_request_send(cont, cfg):
+    cmd = f"python3 /tada-src/python/ldmsd_request_send.py"
+    cmd += f" -x {LDMSD_XPRT} -p {LDMSD_PORT} -H localhost"
+    cmd += f" --cmd '{cfg}'"
+    return cont.exec_run(cmd)
+
+def load_smp(cont, name, plugin=None):
+    cfg = f"load name={name}"
+    if plugin is not None:
+        cfg += f" plugin={plugin}"
+    return ldmsd_request_send(cont, cfg)
+
+def config_smp(cont, name, producer = None, instance = None, **kwargs):
+    cfg = f"config name={name}"
+    if producer is not None:
+        cfg += f" producer={producer}"
+    if instance is not None:
+        cfg += f" instance={instance}"
+    if len(kwargs) > 0:
+        for k, v in kwargs.items():
+            cfg += f" {k}={v}"
+    return ldmsd_request_send(cont, cfg)
+
+def start_smp(cont, name, interval="1s"):
+    cfg = f"start name={name} interval={interval}"
+    return ldmsd_request_send(cont, cfg)
+
+def stop_smp(cont, name):
+    cfg = f"stop name={name}"
+    return ldmsd_request_send(cont, cfg)
+
+def term_smp(cont, name):
+    cfg = f"term name={name}"
+    return ldmsd_request_send(cont, cfg)
+
+def smp_status_get(cont, name):
+    cfg = f"smplr_status name={name}"
+    rc, out = ldmsd_request_send(cont, cfg)
+    return rc, out
+
+def smp_state_get(cont, name):
+    rc, out = smp_status_get(cont, name)
+    if rc != 0:
+        raise RuntimeError(f"Failed to get the status of sampler '{name}'. {out}")
+    d = json.loads(out)
+    return d[0]['state']
+
+def smp_exist(cont, name):
+    rc, out = smp_status_get(cont, name)
+    if rc:
+        if rc == errno.ENOENT:
+            return False
+        else:
+            raise RuntimeError(f"Failed to get the status of sampler '{name}'. {out}")
+    else:
+        return True
+
+def smp_name_get(id):
+    return f"samp_{id}"
+
+### Start ####
+cluster = None
+test.start()
+
+@atexit.register
+def at_exit():
+    rc = test.finish()
+    if cluster is not None:
+        cluster.remove()
+    os._exit(rc)
+
+log.info("-- Get or create the cluster --")
+cluster = LDMSDCluster.get(spec["name"], create = True, spec = spec)
+
+node1 = cluster.get_container("node-1")
+
+log.info("-- Start daemons --")
+cluster.start_daemons()
+cluster.make_known_hosts()
+
+log.info("... wait a bit make sure ldmsd is up")
+time.sleep(1)
+
+# TEST FULL LIFECYCLE
+smp = smp_name_get(TEST_FULL_LIFECYCLE)
+rc, out = load_smp(node1, name = smp, plugin = "test_sampler")
+if rc != 0:
+    test.assert_test(TEST_FULL_LIFECYCLE, rc == 0, "Load successfully")
+state = smp_state_get(node1, name = smp)
+test.assert_test(TEST_INIT_STATE, state == "INIT", "state == INIT")
+
+rc, out = config_smp(node1, name = smp, action="default", producer=node1.name, instance=f"{node1.name}/{smp}")
+if rc != 0:
+    test.assert_test(TEST_FULL_LIFECYCLE, rc == 0, "Config successfully")
+state = smp_state_get(node1, name=smp)
+test.assert_test(TEST_CONFIG_STATE, state == "CONFIGURED", "state == CONFIGURED")
+
+rc, out = start_smp(node1, name=smp)
+if rc != 0:
+    test.assert_test(TEST_FULL_LIFECYCLE, rc == 0, "Start successfully")
+state = smp_state_get(node1, name=smp)
+test.assert_test(TEST_RUNNING_STATE, state == "RUNNING", "state == RUNNING")
+time.sleep(5)
+
+rc, out = stop_smp(node1, name=smp)
+if rc != 0:
+    test.assert_test(TEST_FULL_LIFECYCLE, rc == 0, "Stop successfully")
+state = smp_state_get(node1, name=smp)
+test.assert_test(TEST_STOP_STATE, state == "CONFIGURED", "state == CONFIGURED")
+
+rc, out = term_smp(node1, name=smp)
+if rc != 0:
+    test.assert_test(TEST_FULL_LIFECYCLE, rc == 0, "Term successfully")
+is_exist = smp_exist(node1, name=smp)
+test.assert_test(TEST_TERM_STATE, is_exist == False, "Sampler does not exist after term")
+test.assert_test(TEST_FULL_LIFECYCLE, True, "load->config->start->stop->term works")
+
+# TERM AFTER INIT
+smp = smp_name_get(TEST_TERM_FROM_INIT)
+rc, out = load_smp(node1, name = smp, plugin = "test_sampler")
+if rc != 0:
+    raise RuntimeError(f"Failed to load a sampler cfgobj: {out}")
+rc, out = term_smp(node1, name = smp)
+is_exist = smp_exist(node1, name=smp)
+test.assert_test(TEST_TERM_FROM_INIT, rc == 0 and is_exist == False, "load->term works")
+
+# TEST_TERM_AFTER_CONFIG
+smp = smp_name_get(TEST_TERM_AFTER_CONFIG)
+rc, out = load_smp(node1, name = smp, plugin = "test_sampler")
+if rc != 0:
+    raise RuntimeError(f"Failed to load a sampler cfgobj: {out}")
+rc, out = config_smp(node1, name= smp, action="default", producer = node1.name, instance = f"{node1.name}/{smp}")
+if rc != 0:
+    raise RuntimeError(f"Failed to config a sampler cfgobj: {out}")
+rc, out = term_smp(node1, name = smp)
+is_exist = smp_exist(node1, name=smp)
+test.assert_test(TEST_TERM_AFTER_CONFIG, rc == 0 and is_exist == False, "load->config->term works")
+
+# TEST_STOP_AFTER_CONFIG
+smp = smp_name_get(TEST_STOP_AFTER_CONFIG)
+rc, out = load_smp(node1, name = smp, plugin = "test_sampler")
+if rc != 0:
+    raise RuntimeError(f"Failed to load a sampler cfgobj: {out}")
+rc, out = config_smp(node1, name = smp, action="default", producer = node1.name, instance = f"{node1.name}/{smp}")
+if rc != 0:
+    raise RuntimeError(f"Failed to config a sampler cfgobj: {out}")
+rc, out = stop_smp(node1, name = smp)
+state = smp_state_get(node1, name=smp)
+test.assert_test(TEST_STOP_AFTER_CONFIG, rc != 0 and state == "CONFIGURED", "load->config->stop errors")
+
+# TEST_STOP_AFTER_LOAD
+smp = smp_name_get(TEST_STOP_AFTER_LOAD)
+rc, out = load_smp(node1, name =smp, plugin = "test_sampler")
+if rc != 0:
+    raise RuntimeError(f"Failed to load a sampler cfgobj: {out}")
+rc, out = stop_smp(node1, name = smp)
+state = smp_state_get(node1, name=smp)
+test.assert_test(TEST_STOP_AFTER_LOAD, rc != 0 and state == "INIT", "load->stop errors")
+
+# TEST_RECONFIG_AFTER_CONFIG
+smp = smp_name_get(TEST_RECONFIG_AFTER_CONFIG)
+rc, out = load_smp(node1, name = smp, plugin = "test_sampler")
+if rc != 0:
+    raise RuntimeError(f"failed to load a sampler cfgobj: {out}")
+rc, out = config_smp(node1, name = smp, action = "add_schema", schema = smp, num_metrics=5)
+if rc != 0:
+    raise RuntimeError(f"Failed to config a sampler cfgobj: {out}")
+rc, out = config_smp(node1, name =smp, producer = node1.name, instance = f"{node1.name}/{smp}", action = "add_set", schema = smp)
+state = smp_state_get(node1, name=smp)
+test.assert_test(TEST_RECONFIG_AFTER_CONFIG, rc == 0 and state == "CONFIGURED", "load->config->config works")
+
+# TEST_RECONFIG_AFTER_STOP
+smp = smp_name_get(TEST_RECONFIG_AFTER_STOP)
+rc, out = load_smp(node1, name = smp, plugin = "test_sampler")
+if rc != 0:
+    raise RuntimeError(f"Failed to load a sampler cfgobj: {out}")
+rc, out = config_smp(node1, name = smp, action = "add_schema", schema = smp, num_metrics=5)
+if rc != 0:
+    raise RuntimeError(f"Failed to config a sampler cfgobj: {out}")
+rc, out = start_smp(node1, name = smp)
+if rc != 0:
+    raise RuntimeError(f"Failed to start a sampler cfgobj: {out}")
+time.sleep(5)
+rc, out = stop_smp(node1, name = smp)
+if rc != 0:
+    raise RuntimeError(f"Failed to stop a sampler cfgobj: {out}")
+rc, out = config_smp(node1, name = smp, action = "add_set", producer = node1.name, instance=f"{node1.name}/{smp}", schema = smp)
+state = smp_state_get(node1, name=smp)
+test.assert_test(TEST_RECONFIG_AFTER_STOP, rc == 0 and state == "CONFIGURED", "load->config->start->stop->config works")
+
+# TEST_START_AFTER_LOAD
+smp = smp_name_get(TEST_START_AFTER_LOAD)
+rc, out = load_smp(node1, name = smp, plugin = "test_sampler")
+if rc != 0:
+    raise RuntimeError(f"Failed to load a sampler cfgobj: {out}")
+rc, out = start_smp(node1, name = smp)
+state = smp_state_get(node1, name=smp)
+test.assert_test(TEST_START_AFTER_LOAD, rc != 0 and state == "INIT", "load->start errors")
+
+# TEST_TERM_AFTER_START
+smp = smp_name_get(TEST_TERM_AFTER_START)
+rc, out = load_smp(node1, name = smp, plugin = "test_sampler")
+if rc != 0:
+    raise RuntimeError(f"Failed to load a sampler cfogbj: {out}")
+rc, out = term_smp(node1, name = smp)
+is_exist = smp_exist(node1, name=smp)
+test.assert_test(TEST_TERM_AFTER_START, rc == 0 and is_exist == False, "load->term works")
+
+# TEST_CONFIG_AFTER_START
+smp = smp_name_get(TEST_CONFIG_AFTER_START)
+rc, out = load_smp(node1, name = smp, plugin = "test_sampler")
+if rc != 0:
+    raise RuntimeError(f"Failed to load a sampler cfgobj: {out}")
+rc, out = config_smp(node1, name = smp, action = "add_schema", schema = smp, num_metrics = 5)
+if rc != 0:
+    raise RuntimeError(f"Failed to configure a sampler cfgobj: {out}")
+rc, out = start_smp(node1, name = smp)
+if rc != 0:
+    raise RuntimeError(f"Failed to start a sampler cfgobj: {out}")
+time.sleep(3)
+rc, out = config_smp(node1, name = smp, action = "add_set", schema = smp, producer = node1.name, instance=f"{node1.name}/{smp}")
+state = smp_state_get(node1, name=smp)
+test.assert_test(TEST_CONFIG_AFTER_START, rc != 0 and state == "RUNNING", "load->config->start->config errors")
+
+log.info("---- done ----")
