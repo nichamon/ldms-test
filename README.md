@@ -58,7 +58,7 @@ interacting with each of the containers (e.g. getting aliases of the virtual
 node). `LDMSDCluster` and `LDMSDContainer` are abstract classes that get
 implemented by the runtime plugins (singularity or docker; see
 [runtime](runtime) directory). The runtime selection can be specified in
-[ldms-test.conf](ldms-test.conf) configuration file. Please see [Python Module
+[ldms-test.conf](ldms-test.conf.example) configuration file. Please see [Python Module
 Usage Guide](#python-module-usage-guide) for a guideline on how to use the
 virtual cluster in Python. For full details of the APIs, please see in-line
 Python documentation in the module.
@@ -70,7 +70,7 @@ Cygnus cluster runs on CentOS 7.6.1810.
 SYNOPSIS
 ========
 
-Please see [ldms-test.conf](ldms-test.conf) for the configuration file. Users
+Please see [ldms-test.conf](ldms-test.conf.example) for the configuration file. Users
 can specify which runtime to use (singularity vs docker), which image to use,
 etc.
 
@@ -211,7 +211,7 @@ ip_addr_db = sing_addr.db
 
 ```
 
-Please see [ldms-test.conf](ldms-test.conf) for all available options and their
+Please see [ldms-test.conf](ldms-test.conf.example) for all available options and their
 explanations.
 
 
