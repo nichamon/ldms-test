@@ -65,10 +65,10 @@ spec = {
             ],
         },
         "ldmsd-base" : {
-            "type" : "ldmsd",
-            "listen_port" : 10000,
-            "listen_xprt" : "sock",
-            "listen_auth" : "munge",
+            "type"    : "ldmsd",
+            "listen"  : [
+                { "port": 10000, "xprt": "sock", "auth": "munge" }
+            ],
         },
         "prdcr" : {
             "host" : "%name%",
@@ -103,8 +103,10 @@ spec = {
                 },
                 {
                     "name" : "aggregator",
-                    "!extends" : "ldmsd-base",
-                    "listen_port" : 20000, # override
+                    "type" : "ldmsd",
+                    "listen"  : [
+                        { "port": 20000, "xprt": "sock", "auth": "munge" }
+                    ],
                     "prdcrs" : [ # these producers will turn into `prdcr_add`
                         {
                             "name" : "stream-sampler-1",
@@ -136,8 +138,10 @@ spec = {
                 },
                 {
                     "name" : "aggregator",
-                    "!extends" : "ldmsd-base",
-                    "listen_port" : 20000, # override
+                    "type" : "ldmsd",
+                    "listen"  : [
+                        { "port": 20000, "xprt": "sock", "auth": "munge" }
+                    ],
                     "samplers" : [
                         {
                             "plugin" : "test_stream_sampler",
@@ -372,8 +376,8 @@ if __name__ == "__main__":
     for host in [ 'stream-sampler-1', 'stream-sampler-2' ]:
         cont = cluster.get_container(host)
         cont.write_file(data_file, text_data)
-        start_publisher(cont, host, cont.ldmsd_spec["listen_port"], "json", data_file)
-        start_publisher(cont, host, cont.ldmsd_spec["listen_port"], "string", data_file)
+        start_publisher(cont, host, cont.ldmsd_spec["listen"][0]["port"], "json", data_file)
+        start_publisher(cont, host, cont.ldmsd_spec["listen"][0]["port"], "string", data_file)
 
     time.sleep(2)
 
@@ -464,8 +468,8 @@ if __name__ == "__main__":
     for host in [ 'stream-sampler-1', 'stream-sampler-2' ]:
         cont = cluster.get_container(host)
         cont.write_file(data_file, text_data)
-        start_publisher(cont, host, cont.ldmsd_spec["listen_port"], "json", data_file)
-        start_publisher(cont, host, cont.ldmsd_spec["listen_port"], "string", data_file)
+        start_publisher(cont, host, cont.ldmsd_spec["listen"][0]["port"], "json", data_file)
+        start_publisher(cont, host, cont.ldmsd_spec["listen"][0]["port"], "string", data_file)
 
     time.sleep(2)
 
@@ -549,8 +553,8 @@ if __name__ == "__main__":
     for host in [ 'stream-sampler-1' ]:
         cont = cluster.get_container(host)
         cont.write_file(data_file, text_data)
-        start_publisher(cont, host, cont.ldmsd_spec["listen_port"], "json", data_file)
-        start_publisher(cont, host, cont.ldmsd_spec["listen_port"], "string", data_file)
+        start_publisher(cont, host, cont.ldmsd_spec["listen"][0]["port"], "json", data_file)
+        start_publisher(cont, host, cont.ldmsd_spec["listen"][0]["port"], "string", data_file)
 
     time.sleep(2)
 
@@ -630,8 +634,8 @@ if __name__ == "__main__":
         text_data = json.dumps(_data)
         cont = cluster.get_container(host)
         cont.write_file(data_file, text_data)
-        start_publisher(cont, host, cont.ldmsd_spec["listen_port"], "json", data_file)
-        start_publisher(cont, host, cont.ldmsd_spec["listen_port"], "string", data_file)
+        start_publisher(cont, host, cont.ldmsd_spec["listen"][0]["port"], "json", data_file)
+        start_publisher(cont, host, cont.ldmsd_spec["listen"][0]["port"], "string", data_file)
 
     time.sleep(2)
 
