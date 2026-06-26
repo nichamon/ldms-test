@@ -1550,7 +1550,11 @@ class LDMSDContainer(ABC):
 
     def prep_slurm_conf(self):
         """Prepare slurm configurations"""
-        self.write_file("/etc/slurm/cgroup.conf", "CgroupAutomount=yes")
+        self.write_file("/etc/slurm/cgroup.conf",
+                            "ConstrainCores=yes\n"
+                            "ConstrainDevices=yes\n"
+                            "ConstrainRAMSpace=yes\n"
+                            "ConstrainSwapSpace=yes\n")
         self.write_file("/etc/slurm/slurm.conf", self.cluster.slurm_conf)
 
     def start_slurm(self):
