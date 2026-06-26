@@ -1617,8 +1617,9 @@ class LDMSDContainer(ABC):
             retry -= 1
             rc, out = self.exec_run(prog)
         if rc:
-            raise RuntimeError("{} failed, rc: {}, output: {}" \
-                               .format(prog, rc, out))
+            _, log_out = self.exec_run("cat /var/log/slurmd.log")
+            raise RuntimeError("{} failed, rc: {}, output: {}\nslurmd.log: {}" \
+                           .format(prog, rc, out, log_out))
 
     def start_slurmd(self, **kwargs):
         """Start slurmd"""
